@@ -88,7 +88,7 @@ input[disabled]{opacity:.6}
 </head>
 <body>
 <header>
-  <h1>منصة متابعة الإنجاز<small>مشروع جنان السكني · آخر تحديث: <span id="lastupd">—</span></small></h1>
+  <h1><span id="ttl">منصة الإنجاز للأعمال المعمارية</span><small><span id="sub">مشروع جنان السكني</span> · آخر تحديث: <span id="lastupd">—</span></small></h1>
   <div class="auth" id="auth"></div>
 </header>
 <nav role="tablist" id="tabs"></nav>
@@ -109,6 +109,7 @@ var CFG=window.JENAN_CONFIG||{}, sb=null, LIVE=false;
 try{ if(CFG.url&&CFG.key&&window.supabase){sb=window.supabase.createClient(CFG.url,CFG.key);LIVE=true;} }catch(e){sb=null;LIVE=false}
 var PK=SEED.pk, S={villas:[],pkw:SEED.pkw.slice(),cls:Object.assign({},SEED.cls),W:JSON.parse(JSON.stringify(SEED.W))};
 var NAMES=[]; PK.forEach(function(p){p.items.forEach(function(n){NAMES.push(p.n+' - '+n)})});
+var TTL='منصة الإنجاز للأعمال المعمارية', SUB='مشروع جنان السكني';
 var role=null, user=null, tab='dash', filt={b:'',m:'',q:'',st:'',sort:'land'}, wcls='V', loaded=false;
 function $(s,r){return (r||document).querySelector(s)}
 function pct(x,d){return (x*100).toFixed(d||0)+'%'}
@@ -123,8 +124,9 @@ async function loadAll(){
   var r=await sb.from('villas').select('land,block,model,items,ov,updated_at').order('land');
   if(r.error){toast('تعذر تحميل البيانات: '+r.error.message);S.villas=seedVillas();loaded=true;return}
   S.villas=r.data.map(function(x){return {b:x.block,l:x.land,m:x.model,v:x.items,ov:x.ov||{},t:x.updated_at}});
-  var s=await sb.from('settings').select('pkw,cls,w').eq('id',1).maybeSingle();
-  if(s.data){S.pkw=s.data.pkw;S.cls=s.data.cls;S.W=s.data.w}
+  var s=await sb.from('settings').select('pkw,cls,w,title,subtitle').eq('id',1).maybeSingle();
+  if(s.error){s=await sb.from('settings').select('pkw,cls,w').eq('id',1).maybeSingle()}
+  if(s.data){S.pkw=s.data.pkw;S.cls=s.data.cls;S.W=s.data.w;if(s.data.title)TTL=s.data.title;if(s.data.subtitle!=null&&s.data.subtitle!=='')SUB=s.data.subtitle}
   loaded=true;
 }
 async function loadRole(){
@@ -163,7 +165,7 @@ function subscribe(){
       if(open)return;
       v.v=n.items;v.ov=n.ov||{};v.t=n.updated_at;clearTimeout(rt);rt=setTimeout(render,300);
     }).on('postgres_changes',{event:'UPDATE',schema:'public',table:'settings'},function(p){
-      S.pkw=p.new.pkw;S.cls=p.new.cls;S.W=p.new.w;clearTimeout(rt);rt=setTimeout(render,300);
+      S.pkw=p.new.pkw;S.cls=p.new.cls;S.W=p.new.w;if(p.new.title)TTL=p.new.title;if(p.new.subtitle)SUB=p.new.subtitle;renderAuth();clearTimeout(rt);rt=setTimeout(render,300);
     }).subscribe();
   }catch(e){}
 }
@@ -308,13 +310,26 @@ function renderAuth(){
   else if(!user)h='<span class="chip">زائر · عرض فقط</span><button class="btn pri" id="login" type="button">دخول للتعديل</button>';
   else{
     h='<span class="chip'+(role?' ok':'')+'">'+esc(user.email)+(role?(role==='admin'?' · مدير':' · مهندس'):' · غير مسجل')+'</span>';
-    if(role){h+='<button class="btn" id="logb" type="button">السجل</button><button class="btn" id="engb" type="button">المهندسين</button>'}
+    if(role){h+='<button class="btn" id="ttlb" type="button">تعديل العنوان</button><button class="btn" id="logb" type="button">السجل</button><button class="btn" id="engb" type="button">المهندسين</button>'}
     h+='<button class="btn" id="logout" type="button">خروج</button>';
   }
   h+='<button class="btn" id="theme" type="button" aria-label="تبديل الوضع">◐</button>';
   $('#auth').innerHTML=h;
+  $('#ttl').textContent=TTL;$('#sub').textContent=SUB;document.title=TTL+' – '+SUB;
   var lu=S.villas.map(function(v){return v.t}).filter(Boolean).sort().pop();
   $('#lastupd').textContent=lu?new Date(lu).toLocaleString('ar-SA'):'—';
+}
+/* ---------- تعديل العنوان ---------- */
+function openTitle(){
+  showModal('<div class="sheet-h"><b style="font-size:17px">تعديل عنوان المنصة</b><button class="btn" data-close type="button">إغلاق</button></div><p class="note">يظهر العنوان لكل من يفتح المنصة.</p><div class="tools"><label>العنوان الرئيسي <input type="text" id="tin" value="'+esc(TTL)+'" style="min-width:300px"></label></div><div class="tools" style="margin-top:8px"><label>السطر الثاني <input type="text" id="sin" value="'+esc(SUB)+'" style="min-width:300px"></label></div><div class="tools" style="margin-top:12px"><button class="btn pri" id="tsave" type="button">حفظ</button></div><p class="note" id="tmsg"></p>');
+}
+async function saveTitle(){
+  var t=$('#tin').value.trim(), u=$('#sin').value.trim();
+  if(!t){$('#tmsg').textContent='اكتب عنواناً.';return}
+  var r=await sb.from('settings').update({title:t,subtitle:u}).eq('id',1).select('id');
+  if(r.error){$('#tmsg').textContent='تعذر الحفظ. إذا لم تنفّذ سطر SQL الخاص بالعنوان في Supabase فنفّذه أولاً.';return}
+  if(!r.data||!r.data.length){$('#tmsg').textContent='ليست لديك صلاحية التعديل.';return}
+  TTL=t;SUB=u;renderAuth();closeModal();toast('تم حفظ العنوان');
 }
 /* ---------- السجل والمهندسون ---------- */
 async function openLog(){
@@ -440,7 +455,7 @@ document.addEventListener('click',async function(e){
   if(id==='theme'){var r=document.documentElement,d=r.dataset.theme==='dark'||(!r.dataset.theme&&matchMedia('(prefers-color-scheme:dark)').matches);r.dataset.theme=d?'light':'dark'}
   else if(id==='lpwb')passLogin(); else if(id==='login')openLogin(); else if(id==='lsend')sendLink(); else if(id==='lver')verifyCode();
   else if(id==='logout'){await sb.auth.signOut();await afterAuth()}
-  else if(id==='logb')openLog(); else if(id==='engb')openEng();
+  else if(id==='ttlb')openTitle(); else if(id==='tsave')saveTitle(); else if(id==='logb')openLog(); else if(id==='engb')openEng();
   else if(id==='aeng'){var em=$('#nem').value.trim().toLowerCase();if(!em)return;var rr2=await sb.from('editors').insert({email:em,name:$('#nnm').value.trim()||null});if(rr2.error)toast('تعذرت الإضافة: '+rr2.error.message);openEng()}
   else if(id==='exc')exportCSV(); else if(id==='impb')openImport(); else if(id==='impgo')applyImport();
 });
