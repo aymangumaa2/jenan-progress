@@ -100,6 +100,7 @@ input[disabled]{opacity:.6}
 /* ===== إعداد الربط بقاعدة البيانات: الصق هنا قيمتين من Supabase (Project Settings > API) ===== */
 window.JENAN_CONFIG={ url:'https://zfilcxgnjdogwqeujygf.supabase.co', key:'sb_publishable_T4tXH7r_wneRlUslmnSg1Q_ZuLqhYU4' };
 </script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.min.js"></script>
 <script>
 (function(){
@@ -242,7 +243,7 @@ function vList(){
    '<select id="fs" aria-label="الحالة"><option value="">كل الحالات</option><option value="none"'+(filt.st==='none'?' selected':'')+'>لم تبدأ</option><option value="prog"'+(filt.st==='prog'?' selected':'')+'>قيد التنفيذ</option><option value="done"'+(filt.st==='done'?' selected':'')+'>مكتملة</option></select>'+
    '<select id="fo" aria-label="الترتيب"><option value="land">حسب رقم القطعة</option><option value="asc"'+(filt.sort==='asc'?' selected':'')+'>الأقل إنجازاً أولاً</option><option value="desc"'+(filt.sort==='desc'?' selected':'')+'>الأعلى إنجازاً أولاً</option></select>'+
    '<input type="search" id="fq" placeholder="رقم القطعة" value="'+esc(filt.q)+'" style="width:110px" aria-label="بحث برقم القطعة">'+
-   '<span class="note">'+F.length+' فيلا</span><button class="btn" id="exc" type="button">تصدير CSV</button></div></section>'+
+   '<span class="note">'+F.length+' فيلا</span><button class="btn" id="exc" type="button">تصدير CSV</button>'+(canEdit()?'<button class="btn pri" id="impb" type="button">استيراد من إكسل</button>':'')+'</div></section>'+
    '<section class="card"><div class="scroll" style="max-height:70vh"><table><thead><tr><th>البلوك</th><th>القطعة</th><th>النموذج</th><th>الحالة</th><th>الإنجاز</th>'+PK.map(function(p){return '<th>'+p.n+'</th>'}).join('')+'</tr></thead><tbody>'+
    F.map(function(r){return '<tr class="click" data-edit="'+r.v.l+'"><td>'+esc(r.v.b)+'</td><td><b>'+r.v.l+'</b></td><td>'+esc(r.v.m)+'</td><td>'+pill(r.all)+'</td>'+heatTd(r.all)+r.pr.map(heatTd).join('')+'</tr>'}).join('')+'</tbody></table></div></section>';
 }
@@ -346,6 +347,66 @@ async function openEng(){
   }
   $('#sheet').innerHTML=h;
 }
+
+var COLS=[3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 18, 19, 20, 21, 23, 24, 25, 26, 28, 29, 30, 31, 33, 34, 35, 36, 37, 38, 40, 42, 43, 45, 46, 47, 48, 49, 50, 51, 52, 53, 54, 55, 56, 57, 58, 60, 61, 62, 63, 64];
+var IMP=null;
+function readExcel(file){
+  if(!window.XLSX){$('#impmsg').textContent='تعذر تحميل مكتبة قراءة الإكسل. تأكد من الاتصال بالإنترنت ثم أعد المحاولة.';return}
+  var fr=new FileReader();
+  fr.onload=function(){
+    try{
+      var wb=XLSX.read(new Uint8Array(fr.result),{type:'array'}), ws=wb.Sheets[wb.SheetNames[0]];
+      var rows=XLSX.utils.sheet_to_json(ws,{header:1,defval:null,raw:true});
+      var byLand={};S.villas.forEach(function(v){byLand[v.l]=v});
+      var changes=[],notFound=[],invalid=0,cells=0,seen=0;
+      rows.forEach(function(r,ri){
+        if(ri<4)return;
+        var land=r[1]; if(typeof land!=='number')return;
+        var v=byLand[land]; if(!v){notFound.push(land);return}
+        seen++;
+        var nv=v.v.slice(), n=0;
+        COLS.forEach(function(ci,k){
+          var x=r[ci];
+          if(x==null||x==='')return;
+          if(typeof x!=='number'||x<0||x>1){invalid++;return}
+          var cur=v.v[k];
+          if(cur==null&&x===0)return;
+          if(cur!=null&&Math.abs(cur-x)<1e-9)return;
+          nv[k]=x;n++;
+        });
+        if(n){changes.push({v:v,nv:nv,n:n});cells+=n}
+      });
+      IMP={changes:changes};
+      var h='<p><b>'+esc(file.name)+'</b></p><div class="kpis" style="margin:8px 0"><div class="kpi"><b>'+seen+'</b><span>فلل قُرئت</span></div><div class="kpi warn"><b>'+changes.length+'</b><span>فلل ستتغير</span></div><div class="kpi"><b>'+cells+'</b><span>خلايا ستتغير</span></div></div>';
+      if(notFound.length)h+='<p class="note">أرقام قطع غير موجودة في المنصة وتم تجاهلها: '+esc(notFound.slice(0,20).join('، '))+'</p>';
+      if(invalid)h+='<p class="note">'+invalid+' خلية بقيم غير رقمية أو خارج 0 إلى 1 وتم تجاهلها.</p>';
+      if(!changes.length)h+='<p class="note">لا توجد تغييرات للحفظ: كل القيم في الملف مطابقة لما في المنصة.</p>';
+      else{
+        h+='<div class="scroll" style="max-height:240px"><table><thead><tr><th>البلوك</th><th>القطعة</th><th>عدد البنود المتغيرة</th></tr></thead><tbody>'+changes.slice(0,40).map(function(c){return '<tr><td>'+esc(c.v.b)+'</td><td>'+c.v.l+'</td><td>'+c.n+'</td></tr>'}).join('')+'</tbody></table></div>'+(changes.length>40?'<p class="note">… و'+(changes.length-40)+' فيلا أخرى</p>':'')+
+        '<p class="note">يُحدَّث فقط ما فيه قيمة في الملف، والخلايا الفارغة تبقى كما هي. سيُسجَّل ذلك في سجل التعديلات باسمك.</p><div class="tools"><button class="btn pri" id="impgo" type="button">تطبيق التغييرات</button></div>';
+      }
+      $('#impres').innerHTML=h; $('#impmsg').textContent='';
+    }catch(e){$('#impmsg').textContent='تعذر قراءة الملف. تأكد أنه ملف إكسل (xlsx) بنفس شكل الملف الأصلي.'}
+  };
+  fr.readAsArrayBuffer(file);
+}
+function openImport(){
+  IMP=null;
+  showModal('<div class="sheet-h"><b style="font-size:17px">استيراد من إكسل</b><button class="btn" data-close type="button">إغلاق</button></div><p class="note">اختر ملف إكسل بنفس شكل ملف «موقف الأعمال المعمارية» (رقم القطعة في العمود B). سترى ملخصاً قبل الحفظ.</p><div class="tools"><input type="file" id="impf" accept=".xlsx,.xlsm" aria-label="ملف إكسل"></div><p class="note" id="impmsg"></p><div id="impres"></div>');
+}
+async function applyImport(){
+  if(!IMP||!canEdit())return;
+  var ch=IMP.changes, ok=0, fail=0, btn=$('#impgo'); btn.disabled=true;
+  for(var i=0;i<ch.length;i+=8){
+    var part=ch.slice(i,i+8);
+    var res=await Promise.all(part.map(function(c){return sb.from('villas').update({items:c.nv,ov:c.v.ov||{}}).eq('land',c.v.l).select('land')}));
+    res.forEach(function(r){if(r.error||!r.data||!r.data.length)fail++;else ok++});
+    $('#impmsg').textContent='جارٍ الحفظ… '+Math.min(i+8,ch.length)+' من '+ch.length;
+  }
+  await loadAll(); renderAuth(); IMP=null;
+  $('#impres').innerHTML='<div class="banner">تم حفظ '+ok+' فيلا'+(fail?'، وتعذر حفظ '+fail+' فيلا (راجع الصلاحيات ثم أعد المحاولة).':'.')+'</div>';
+  $('#impmsg').textContent=''; render();
+}
 /* ---------- تصدير ---------- */
 function toCSV(){
   var head=['البلوك','القطعة','النموذج','الإنجاز'].concat(PK.map(function(p){return p.n})).concat(NAMES);
@@ -381,7 +442,7 @@ document.addEventListener('click',async function(e){
   else if(id==='logout'){await sb.auth.signOut();await afterAuth()}
   else if(id==='logb')openLog(); else if(id==='engb')openEng();
   else if(id==='aeng'){var em=$('#nem').value.trim().toLowerCase();if(!em)return;var rr2=await sb.from('editors').insert({email:em,name:$('#nnm').value.trim()||null});if(rr2.error)toast('تعذرت الإضافة: '+rr2.error.message);openEng()}
-  else if(id==='exc')exportCSV();
+  else if(id==='exc')exportCSV(); else if(id==='impb')openImport(); else if(id==='impgo')applyImport();
 });
 document.addEventListener('keydown',function(e){
   if(e.key==='Escape')closeModal();
@@ -390,6 +451,7 @@ document.addEventListener('keydown',function(e){
 document.addEventListener('change',function(e){
   var t=e.target;
   if(t.id==='fb'){filt.b=t.value;render()} else if(t.id==='fm'){filt.m=t.value;render()} else if(t.id==='fs'){filt.st=t.value;render()} else if(t.id==='fo'){filt.sort=t.value;render()}
+  else if(t.id==='impf'&&t.files[0]){readExcel(t.files[0])}
   else if(!canEdit())return;
   else if(t.dataset.it!=null){var v=curVilla();var x=t.value===''?null:Math.max(0,Math.min(100,parseFloat(t.value)))/100;v.v[+t.dataset.it]=isNaN(x)?null:x;persist(v);openEdit(v.l)}
   else if(t.dataset.ovr!=null){var v3=curVilla();v3.ov=v3.ov||{};if(t.value==='')delete v3.ov[+t.dataset.ovr];else v3.ov[+t.dataset.ovr]=Math.max(0,Math.min(100,parseFloat(t.value)))/100;persist(v3);openEdit(v3.l)}
